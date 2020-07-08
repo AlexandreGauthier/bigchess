@@ -1,0 +1,20 @@
+[package]
+name = "bigchess"
+version = "0.1.0"
+authors = ["Alexandre Gauthier <alexandre.gauthier12@gmail.com>"]
+license = "MIT"
+build = "build.rs"
+edition = "2018"
+exclude = ["artifacts.json", "index.node"]
+
+
+[lib]
+name = "bigchess"
+crate-type = ["cdylib"]
+
+[build-dependencies]
+neon-build = "0.4.0"
+cc = "1.0"
+
+[dependencies]
+neon = "0.4.0"
