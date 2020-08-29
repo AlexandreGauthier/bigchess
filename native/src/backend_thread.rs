@@ -1,7 +1,5 @@
-pub mod database;
-pub mod errors;
-pub mod game;
-pub mod routes;
+use crate::state;
+use crate::routes;
 
 use std::net::SocketAddrV4;
 use std::sync::mpsc;
@@ -15,7 +13,7 @@ pub fn start() -> u16 {
 
 #[tokio::main]
 async fn bind_server(send_port: mpsc::Sender<u16>) {
-    let game_state = game::StateHandle::default();
+    let game_state = state::StateHandle::default();
     let routes = routes::config(game_state);
     let address = "127.0.0.1:0".parse::<SocketAddrV4>().unwrap();
 

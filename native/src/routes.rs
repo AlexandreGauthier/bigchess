@@ -1,5 +1,5 @@
-use crate::backend::game;
-use crate::backend::errors::Error;
+use crate::state::StateHandle;
+use crate::errors::Error;
 
 use serde::Serialize;
 use warp::http::StatusCode;
@@ -8,7 +8,7 @@ use warp::{filters::BoxedFilter, Filter};
 pub type WarpReply = warp::reply::WithStatus<warp::reply::Json>;
 
 // TODO: Transform to json-based api
-pub fn config(state_handle: game::StateHandle) -> BoxedFilter<(impl warp::Reply,)> {
+pub fn config(state_handle: StateHandle) -> BoxedFilter<(impl warp::Reply,)> {
     let _state_handle = state_handle.clone();
     let play = warp::path!("play" / usize / String / String)
         .map(move |index, from, to| route_play(_state_handle.clone(), index, from, to));
@@ -24,17 +24,17 @@ pub fn config(state_handle: game::StateHandle) -> BoxedFilter<(impl warp::Reply,
     (play.or(state).or(navigate_back)).and(warp::post()).boxed()
 }
 
-fn route_play(state: game::StateHandle, index: usize, from: String, to: String) -> WarpReply {
+fn route_play(state: StateHandle, index: usize, from: String, to: String) -> WarpReply {
     let result = state.play(index, from, to);
     result_to_warp_reply(result)
 }
 
-fn route_navigate_back(state: game::StateHandle, index: usize, back: u16) -> WarpReply {
+fn route_navigate_back(state: StateHandle, index: usize, back: u16) -> WarpReply {
     let result = state.navigate_back(index, back);
     result_to_warp_reply(result)
 }
 
-fn route_state(state: game::StateHandle) -> WarpReply {
+fn route_state(state: StateHandle) -> WarpReply {
     let result = state.get_all_games();
     result_to_warp_reply(result)
 }
