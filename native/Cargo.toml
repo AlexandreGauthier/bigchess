@@ -1,0 +1,26 @@
+[package]
+name = "bigchess"
+version = "0.1.0"
+authors = ["Alexandre Gauthier <alexandre.gauthier12@gmail.com>"]
+license = "GPL-3.0-or-later"
+build = "build.rs"
+edition = "2018"
+exclude = ["artifacts.json", "index.node"]
+
+[lib]
+name = "bigchess"
+crate-type = ["cdylib"]
+
+[build-dependencies]
+neon-build = "0.4.0"
+
+[dependencies]
+tokio = { version = "0.2", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+dashmap = "3.11"
+nanoid = "0.3"
+neon = "0.4.0"
+shakmaty = "0.16"
+warp = "0.2"
+rand = "0.7"
+
