@@ -31,7 +31,6 @@ impl Game {
     }
 
     fn find_or_create_branch(&mut self, from: &String, to: &String, line: &Vec<SanPlus>) -> Result<SanPlus, Error> {
-
         let branch = traverse_down(&mut self.game_tree, line.as_slice())?;
         let pos = shakmaty_position(&self.initial_position, line);
         let mov = fromto_to_move(from, to, &pos)?;
