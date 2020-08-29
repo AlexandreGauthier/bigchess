@@ -11,7 +11,7 @@ pub type WarpReply = warp::reply::WithStatus<warp::reply::Json>;
 pub fn config(state_handle: game::StateHandle) -> BoxedFilter<(impl warp::Reply,)> {
     let _state_handle = state_handle.clone();
     let play = warp::path!("play" / usize / String / String)
-        .map(move |game, from, to| route_play(_state_handle.clone(), game, from, to));
+        .map(move |index, from, to| route_play(_state_handle.clone(), index, from, to));
 
     let _state_handle = state_handle.clone();
     let state = warp::path("state")

@@ -10,7 +10,6 @@ pub use json::JsonResponse as JsonResponse;
 
 type InnerState = Vec<Option<Box<Mutex<Game>>>>;
 
-#[derive(Default)]
 pub struct StateHandle {
     inner: Arc<RwLock<InnerState>>
 }
@@ -20,7 +19,7 @@ impl StateHandle {
         let read_lock = self.read()?;
         let mut game_lock = read_lock.get_game(index)?;
         game_lock.play(from, to)
-            .map(|_| game_lock.generate_json())
+            .map(|res| game_lock.generate_json())
     }
 
     pub fn navigate_back(&self, index: usize, back: u16) -> Result<JsonResponse, Error> {
@@ -40,12 +39,32 @@ impl StateHandle {
         Ok(responses)
     }
 
+    pub fn new_game_default(&self) -> Result<JsonResponse, Error> {
+        let mut write_lock = self.write()?;
+        let index = write_lock.new_game_default();
+        drop(write_lock);
+
+        let read_lock = self.read()?;
+        let game = read_lock.get_game(index)?;
+        Ok(game.generate_json())
+    }
+
     fn read(&self) -> Result<RwLockReadGuard<InnerState>, Error> {
         self.inner.read().map_err(|_| Error::PoisonedMutex)
     }
 
     fn write(&self) -> Result<RwLockWriteGuard<InnerState>, Error> {
         self.inner.write().map_err(|_| Error::PoisonedMutex)
+    }
+}
+
+impl Default for StateHandle {
+    fn default() -> StateHandle {
+        let state =  StateHandle {
+            inner: Arc::new(RwLock::new(Vec::new()))
+        };
+    let _ = state.new_game_default();
+    state
     }
 }
 
@@ -57,7 +76,7 @@ impl Clone for StateHandle {
     }
 }
 
-pub trait ReadOperations<'a> {
+trait ReadOperations<'a> {
     fn get_game(&'a self, index: usize) -> Result<MutexGuard<'a, Game>, Error>;
     fn all_games(&'a self) -> GamesIterator<'a>;
 }
@@ -78,13 +97,15 @@ impl<'a> ReadOperations<'a> for RwLockReadGuard<'a, InnerState> {
     } 
 }
 
-pub trait WriteOperations<'a> {
-    fn close_game(&'a mut self, index: usize) -> Result<(), Error>;
-    fn new_game_default(&'a mut self) -> usize;
+
+
+pub trait WriteOperations {
+    fn close_game(&mut self, index: usize) -> Result<(), Error>;
+    fn new_game_default(&mut self) -> usize;
 }
 
-impl<'a> WriteOperations<'a> for RwLockWriteGuard<'a, InnerState> {
-    fn close_game(&'a mut self, index: usize) -> Result<(), Error> {
+impl<'a> WriteOperations for RwLockWriteGuard<'a, InnerState> {
+    fn close_game(&mut self, index: usize) -> Result<(), Error> {
         let element = self.get_mut(index)
             .ok_or(Error::BadGameHandle(index))?;
 
@@ -97,7 +118,7 @@ impl<'a> WriteOperations<'a> for RwLockWriteGuard<'a, InnerState> {
         }
     }
 
-    fn new_game_default(&'a mut self) -> usize {
+    fn new_game_default(&mut self) -> usize {
         let game = Game::default();
         insert_game(self, game)
     }
@@ -130,22 +151,24 @@ impl<'a> Iterator for GamesIterator<'a> {
     }
 }
 
-fn insert_game(vec: &mut Vec<Option<Box<Mutex<Game>>>>, game: Game) -> usize {
-    let element = Some(Box::new(Mutex::new(game)));
+fn insert_game(vec: &mut Vec<Option<Box<Mutex<Game>>>>, mut game: Game) -> usize {
     let index = vec.len();
+    game.index = index;
+    let element = Some(Box::new(Mutex::new(game)));
     vec.push(element);
     index
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Game {
+    index: usize,
     game_info: GameInfo,
     current_line: Vec<SanPlus>,
     initial_position: shakmaty::Chess,
     game_tree: GameTree
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct GameTree {
     san: Option<SanPlus>,
     lines: Vec<GameTree>,
@@ -155,7 +178,7 @@ struct GameTree {
 
 impl Game {
     pub fn play(&mut self, from: String, to: String) -> Result<(), Error> {
-        let san = self.find_or_create_branch(&to, &from, &self.current_line.clone())?;
+        let san = self.find_or_create_branch(&from, &to, &self.current_line.clone())?;
         self.current_line.push(san);
         Ok(())
     }
@@ -164,7 +187,7 @@ impl Game {
 
         let branch = traverse_down(&mut self.game_tree, line.as_slice())?;
         let pos = shakmaty_position(&self.initial_position, line);
-        let mov = tofrom_to_move(from, to, &pos)?;
+        let mov = fromto_to_move(from, to, &pos)?;
         let san = SanPlus::from_move(pos, &mov);
 
         let existing_branch = branch.lines.iter().position(|elem| {elem.san.as_ref() == Some(&san)});
@@ -198,7 +221,9 @@ fn traverse_down<'a>(tree: &'a mut GameTree, line: &[SanPlus]) -> Result<&'a mut
     }
 }
 
-fn shakmaty_position(starting_position: &shakmaty::Chess, line: &Vec<SanPlus>) -> shakmaty::Chess {
+fn shakmaty_position<'a, I>(starting_position: &shakmaty::Chess, line: I) -> shakmaty::Chess
+where I: IntoIterator<Item=&'a SanPlus>,
+{
     let mut position = starting_position.clone();
     for san in line {
         let m = san.san.to_move(&position).expect("Tried to compute an invalid line");
@@ -207,7 +232,7 @@ fn shakmaty_position(starting_position: &shakmaty::Chess, line: &Vec<SanPlus>) -
     position
 }
 
-fn tofrom_to_move (from: &String, to: &String, pos: &shakmaty::Chess) -> Result<shakmaty::Move, Error> {
+fn fromto_to_move (from: &String, to: &String, pos: &shakmaty::Chess) -> Result<shakmaty::Move, Error> {
     let m = format!("{}{}", from, to).parse::<Uci>()?;
     Ok(m.to_move(pos)?)
 }
@@ -222,11 +247,12 @@ fn insert_branch(vec: &mut Vec<GameTree>, san: SanPlus) {
         lines: Vec::new(),
         annotation: None,
         evaluation: None
-    })
+    });
 }
 
 
 // TODO
+#[derive(Debug)]
 enum Annotation {}
 
 // TODO (Maybe in other module)
@@ -256,6 +282,7 @@ mod json {
     #[derive(Serialize, Debug)]
     pub struct JsonResponse {
         pub code: u16,
+        pub index: usize,
         pub available_moves: HashMap<String, Vec<String>>,
         pub fen: String,
         pub is_takes: bool,
@@ -264,14 +291,27 @@ mod json {
 
 
     pub fn generate_json(game: &game::Game) -> JsonResponse {
-        let pos = &game::shakmaty_position(&game.initial_position, &game.current_line);
-        let last_move = game.current_line.last();
+        let (maybe_last, current_pos) = last_and_current_position(game);
+        
         JsonResponse {
             code: 200,
-            available_moves: available_moves(pos),
-            fen: fen(pos),
-            is_takes: is_takes(last_move, pos),
-            is_check: pos.is_check()
+            index: game.index,
+            available_moves: dbg!(available_moves(&current_pos)),
+            fen: dbg!(fen(&current_pos)),
+            is_takes: dbg!(is_takes(maybe_last)),
+            is_check: dbg!(current_pos.is_check())
+        }
+    }
+
+    fn last_and_current_position(game: &game::Game) -> (Option<(SanPlus, shakmaty::Chess)>, shakmaty::Chess) {
+        match game.current_line.split_last() {
+            Some((last_move, line)) => {
+                let last_pos = game::shakmaty_position(&game.initial_position, line);
+                let current_pos = game::shakmaty_position(&last_pos, std::iter::once(last_move));
+                (Some((last_move.clone(), last_pos)), current_pos)
+                 
+            },
+            None => (None, game.initial_position.clone())
         }
     }
 
@@ -307,10 +347,12 @@ mod json {
         shakmaty::fen::fen(pos).to_string()
     }
 
-    fn is_takes(san: Option<&SanPlus>, pos: &shakmaty::Chess) -> bool {
-        match san {
+    fn is_takes(maybe_last: Option<(SanPlus, shakmaty::Chess)>) -> bool {
+        match maybe_last {
             None => false,
-            Some(s) => game::san_to_move(s, pos).unwrap().is_capture()
+            Some((san, pos)) => {
+                game::san_to_move(&san, &pos).unwrap().is_capture()
+            }
         }
     }
 }
