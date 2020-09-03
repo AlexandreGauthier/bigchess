@@ -1,23 +1,40 @@
-use crate::routes::WarpReply;
+use serde::{Serialize, Serializer};
+use serde_json;
 
-use std::fmt;
-use std::sync::PoisonError;
-
-use serde::Serialize;
-use warp::http::StatusCode;
-use shakmaty::IllegalMoveError;
-use shakmaty::uci::ParseUciError;
+use shakmaty::fen::ParseFenError;
 use shakmaty::san::SanError;
+use shakmaty::uci::ParseUciError;
+use shakmaty::IllegalMoveError;
+use shakmaty::PositionError;
+use std::sync::PoisonError;
+use tokio::io;
 
 #[derive(Debug)]
 pub enum Error {
     IllegalMove(IllegalMoveError),
     ParseUci(ParseUciError),
+    ParseFen(ParseFenError),
+    InvalidPosition(PositionError),
     InvalidSan(SanError),
     StaleGameHandle(usize),
     BadGameHandle(usize),
     PoisonedMutex,
     TraverseDownBadLine,
+    IO(io::Error),
+    Deserialize(serde_json::Error),
+}
+
+// TODO
+impl Serialize for Error {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&*format!(
+            "ERROR SERIALIZATION NOT YET IMPLEMENTED -- {:?}",
+            self
+        ))
+    }
 }
 
 impl From<IllegalMoveError> for Error {
@@ -38,68 +55,32 @@ impl From<ParseUciError> for Error {
     }
 }
 
+impl From<ParseFenError> for Error {
+    fn from(e: ParseFenError) -> Error {
+        Error::ParseFen(e)
+    }
+}
+
+impl From<PositionError> for Error {
+    fn from(e: PositionError) -> Error {
+        Error::InvalidPosition(e)
+    }
+}
+
 impl From<SanError> for Error {
     fn from(e: SanError) -> Error {
         Error::InvalidSan(e)
     }
 }
 
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self {
-            Error::IllegalMove(e) => {
-               write!(f, "Recieved move request for an illegal move: {}).", e)
-            },
-            Error::ParseUci(e) => {
-               write!(f, "'From' and 'to' parameters do not form a valid uci move: {}).", e)
-            },
-            Error::InvalidSan(e) => {
-               write!(f, "'From' and 'to' parameters do not form a valid uci move: {}).", e)
-            },
-            Error::StaleGameHandle(handle) => {
-                write!(f, "Tried to use stale game handle ({}).", handle) 
-            },
-            Error::BadGameHandle(handle) => {
-                write!(f, "Mo game associated with handle {}.", handle) 
-            },
-            Error::TraverseDownBadLine => {
-                write!(f, "Tried to access a non-existant line of a game tree.") 
-            },
-            Error::PoisonedMutex => {
-                write!(f, "Program memory is corrupted because of a crash. (Poisoned mutex)") 
-            }
-        }
+impl From<io::Error> for Error {
+    fn from(e: io::Error) -> Error {
+        Error::IO(e)
     }
 }
 
-#[derive(Serialize)]
-struct ErrorJson {
-    message: String,
-    code: u16,
-}
-
-
-impl Error {
-    pub fn into_warp_reply(self) -> WarpReply {
-        let message = self.to_string();
-        let code: u16 = match self {
-            Error::ParseUci(_) => 400,
-            Error::InvalidSan(_) => 400,
-            Error::IllegalMove(_) => 400,
-            Error::BadGameHandle(_) => 400,
-            Error::StaleGameHandle(_) => 400,
-            Error::TraverseDownBadLine => 500,
-            Error::PoisonedMutex => 500,
-        };
-
-        generate_error_reply(message, code)
+impl From<serde_json::Error> for Error {
+    fn from(e: serde_json::Error) -> Error {
+        Error::Deserialize(e)
     }
-}
-
-fn generate_error_reply(message: String, code: u16) -> WarpReply {
-    let json = ErrorJson { message, code };
-    let json = warp::reply::json(&json);
-    let code = StatusCode::from_u16(code).unwrap();
-    warp::reply::with_status(json, code)
 }
