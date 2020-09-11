@@ -10,7 +10,7 @@
 
 ## Design
 
-Inspired by the [xi-editor](https://github.com/xi-editor/xi-editor), the program's logic is completely decoupled from the GUI. It consists of bigchess-core, a backend written in Rust and bigchess-electron, an electron frontend. These components communicate in JSON through bigchess-core's standard input and output.
+Inspired by the [xi-editor](https://github.com/xi-editor/xi-editor), the program's logic is completely decoupled from the GUI. It consists of a backend written in Rust and an electron frontend. These components communicate in JSON through bigchess-core's standard input and output.
 
 ## Compiling
 
