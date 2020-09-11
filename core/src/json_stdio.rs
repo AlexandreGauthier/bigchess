@@ -24,9 +24,19 @@ pub async fn handler(state: StateHandle) -> Result<(), Error> {
     }
 }
 
+/// Only returns Err(Error) when it is not recoverable
+/// All other errors are returned in the form of Ok(Response)
 fn dispatch_line(line: &str, state: &StateHandle) -> Result<Response, Error> {
-    let request = serde_json::from_str(line)?;
-    match request {
+    match serde_json::from_str(line) {
+        Ok(request) => dispatch_request(request, state),
+        Err(err) => return Ok(response_from_error(err.into())),
+    }
+}
+
+/// Only returns Err(Error) when it is not recoverable
+/// All other errors are returned in the form of Ok(Response)
+fn dispatch_request(request: Request, state: &StateHandle) -> Result<Response, Error> {
+    let result = match request {
         Request::Play(PlayArgs { index, from, to }) => state.play(index, from, to),
         Request::NavigateBack(NavigateBackArgs { index, back }) => state.navigate_back(index, back),
         Request::GetAllGames => state.get_all_games(),
@@ -34,6 +44,17 @@ fn dispatch_line(line: &str, state: &StateHandle) -> Result<Response, Error> {
             NewGameType::Default => state.new_game_default(),
             NewGameType::FromFen(fen) => state.new_game_fen(fen),
         },
+    };
+
+    handle_fatal_error(result)
+}
+
+/// Converts Err(Error) to Some(Response) as long as it is recoverable
+fn handle_fatal_error(result: Result<Response, Error>) -> Result<Response, Error> {
+    match result {
+        Ok(response) => Ok(response),
+        Err(err) if err.is_recoverable() => Ok(response_from_error(err)),
+        Err(err) => Err(err),
     }
 }
 
@@ -73,6 +94,7 @@ pub fn send_to_stream<W: Write + Debug>(response: Response, mut stream: W) {
         ));
 }
 
+/// Request type into which JSON from stdin is deserialized
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "method", content = "params")]
@@ -83,6 +105,7 @@ enum Request {
     NewGame(NewGameType),
 }
 
+/// Response type to be serialized into JSON and sent to stdout
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "snake_case")]
 pub struct Response {

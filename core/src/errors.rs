@@ -23,6 +23,10 @@ impl Error {
     pub fn is_type(&self, error_type: ErrorType) -> bool {
         self.error_type == error_type
     }
+
+    pub fn is_recoverable(&self) -> bool {
+        !self.is_type(ErrorType::PoisonedHandle)
+    }
 }
 
 impl Display for Error {
