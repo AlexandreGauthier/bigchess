@@ -8,11 +8,10 @@
 - [ ] UCI engine integration
 - [ ] Manage game databases
 
+## Design
+
+Inspired by the [xi-editor](https://github.com/xi-editor/xi-editor), the program's logic is completely decoupled from the GUI. It consists of bigchess-core, a backend written in Rust and bigchess-electron, an electron frontend. These components communicate in JSON through bigchess-core's standard input and output.
+
 ## Compiling
 
-Setup Neon's [build dependencies.](https://neon-bindings.com/docs/getting-started/).
-```
-$ npm install
-$ npm run build
-$ npm start
-```
+TODO
