@@ -25,6 +25,9 @@ async fn main() {
 }
 
 // TODO
-fn exit_gracefully(_result: Result<(), Error>) {
-    unimplemented!()
+fn exit_gracefully(result: Result<(), Error>) {
+    // Not sure how to shutdown if there's not an error
+    // Maybe save current files, etc.
+    let fatal_error = json_stdio::response_from_error(result.unwrap_err());
+    json_stdio::send_to_stream(fatal_error, &mut std::io::stdout())
 }

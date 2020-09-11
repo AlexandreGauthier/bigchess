@@ -1,9 +1,10 @@
 use crate::database::DatabaseRepr;
 use crate::engine::EngineRepr;
-use crate::errors::Error;
+use crate::errors::{Error, ErrorRepr};
 use crate::game::GameRepr;
 use crate::state::StateHandle;
 
+use std::fmt::Debug;
 use std::io::Write;
 
 use serde::{Deserialize, Serialize};
@@ -12,20 +13,18 @@ use tokio::io;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 pub async fn handler(state: StateHandle) -> Result<(), Error> {
+    let mut stdout = std::io::stdout();
     let stdin = io::stdin();
     let mut stdin_lines = BufReader::new(stdin).lines();
 
     loop {
-        let line = stdin_lines.next_line().await?.unwrap_or_default();
-
-        let result = dispatch_line(&*line, &state);
-        if let Err(err) = result {
-            respond_with_error(err)
-        }
+        let new_line = stdin_lines.next_line().await?.unwrap_or_default();
+        let response = dispatch_line(&*new_line, &state)?;
+        send_to_stream(response, &mut stdout);
     }
 }
 
-fn dispatch_line(line: &str, state: &StateHandle) -> Result<(), Error> {
+fn dispatch_line(line: &str, state: &StateHandle) -> Result<Response, Error> {
     let request = serde_json::from_str(line)?;
     match request {
         Request::Play(PlayArgs { index, from, to }) => state.play(index, from, to),
@@ -38,44 +37,40 @@ fn dispatch_line(line: &str, state: &StateHandle) -> Result<(), Error> {
     }
 }
 
-fn respond_with_error(error: Error) {
-    let response = Response {
-        error: Some(error),
+pub fn response_from_error(error: Error) -> Response {
+    Response {
+        error: Some(error.into()),
         changed_games: Vec::new(),
-    };
-
-    send_to_stdout(response);
+    }
 }
 
-pub fn respond_with_game(repr: GameRepr) {
+pub fn response_from_game(repr: GameRepr) -> Response {
     let mut changed_games = Vec::new();
     changed_games.push(repr);
 
-    let response = Response {
+    Response {
         error: None,
         changed_games,
-    };
-
-    send_to_stdout(response);
+    }
 }
 
-pub fn respond_with_games(games: impl Iterator<Item = GameRepr>) {
-    let response = Response {
+pub fn response_from_games(games: impl Iterator<Item = GameRepr>) -> Response {
+    Response {
         error: None,
         changed_games: games.collect(),
-    };
-
-    send_to_stdout(response);
+    }
 }
 
-pub fn send_to_stdout(response: Response) {
-    let mut stdout = std::io::stdout();
-    serde_json::to_writer(&mut stdout, &response)
+pub fn send_to_stream<W: Write + Debug>(response: Response, mut stream: W) {
+    serde_json::to_writer(&mut stream, &response)
         .expect("Unrecoverable error: could not serialize response object to stdout.");
 
-    write!(&mut stdout, "\n")
-        .and_then(|_| stdout.flush())
-        .expect("Unrecoverable error: could not write to stdout.");
+    write!(&mut stream, "\n")
+        .and_then(|_| stream.flush())
+        .expect(&*format!(
+            "Unrecoverable error: could not write to stream {:?}",
+            stream,
+        ));
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -91,7 +86,7 @@ enum Request {
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "snake_case")]
 pub struct Response {
-    error: Option<Error>,
+    error: Option<ErrorRepr>,
     changed_games: Vec<GameRepr>,
 }
 
