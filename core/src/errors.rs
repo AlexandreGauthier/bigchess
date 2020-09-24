@@ -17,6 +17,7 @@ use tokio::io;
 pub struct Error {
     pub error_type: ErrorType,
     pub source: Option<Box<dyn std::error::Error + 'static>>,
+    pub id: Option<String>,
 }
 
 impl Error {
@@ -26,6 +27,22 @@ impl Error {
 
     pub fn is_recoverable(&self) -> bool {
         !self.is_type(ErrorType::PoisonedHandle)
+    }
+
+    pub fn new(error_type: ErrorType) -> Error {
+        Error {
+            error_type,
+            source: None,
+            id: None,
+        }
+    }
+
+    pub fn with_id(self, id: &String) -> Self {
+        Error {
+            error_type: self.error_type,
+            source: self.source,
+            id: Some(id.clone()),
+        }
     }
 }
 
@@ -64,6 +81,7 @@ pub struct ErrorRepr {
     error_type: ErrorType,
     message: String,
     underlying_error: Option<String>,
+    game_id: Option<String>,
 }
 
 impl From<Error> for ErrorRepr {
@@ -72,6 +90,7 @@ impl From<Error> for ErrorRepr {
         ErrorRepr {
             error_type: e.error_type,
             underlying_error: Some(format!("{:?}", e.source)),
+            game_id: e.id,
             message,
         }
     }
@@ -91,14 +110,6 @@ fn human_readable_message(err_type: &ErrorType) -> String {
     String::from(message)
 }
 
-/// Makes throwing errors without a source less verbose
-pub fn empty(t: ErrorType) -> Error {
-    Error {
-        error_type: t,
-        source: None,
-    }
-}
-
 /// Generates error type chaining boilerplate.
 /// ```
 /// conversion_boilerplate!(ErrorType::Deserialize => {
@@ -114,6 +125,7 @@ pub fn empty(t: ErrorType) -> Error {
 ///        Error {
 ///            error_type: ErrorType::Deserialize,
 ///            source: Some(Box::from(e)),
+///            id: None
 ///        }
 ///    }
 ///}
@@ -123,6 +135,7 @@ pub fn empty(t: ErrorType) -> Error {
 ///        Error {
 ///            error_type: ErrorType::Deserialize,
 ///            source: Some(Box::from(e)),
+///            id: None
 ///        }
 ///    }
 ///}
@@ -135,6 +148,7 @@ macro_rules! conversion_boilerplate {
                         Error {
                             error_type: $t,
                             source: Some(Box::from(e)),
+                            id: None
                         }
                     }
                 }
@@ -149,6 +163,7 @@ impl<T> From<PoisonError<T>> for Error {
         Error {
             error_type: ErrorType::PoisonedHandle,
             source: None,
+            id: None,
         }
     }
 }

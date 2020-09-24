@@ -9,8 +9,6 @@ use shakmaty::Position;
 
 #[derive(Default, Debug)]
 pub struct Game {
-    /// Index if the game in state's inner Vec
-    pub index: usize,
     /// Textual information about the game.
     game_info: GameInfo,
     /// List of san moves leading to the current position (e4 e5 Nf3 nc6 ...)
@@ -78,7 +76,6 @@ impl Game {
     pub fn get_repr(&self) -> GameRepr {
         let (maybe_last, current_position) = last_and_current_position(self);
         GameRepr {
-            index: self.index,
             available_moves: available_moves(&current_position),
             fen: fen(&current_position),
             is_takes: is_takes(maybe_last),
@@ -111,10 +108,7 @@ fn traverse_down<'a>(tree: &'a mut GameTree, line: &[SanPlus]) -> Result<&'a mut
                 .iter_mut()
                 .find(|pos| pos.san.as_ref() == Some(san));
             match child {
-                None => Err(Error {
-                    error_type: ErrorType::ChessRules,
-                    source: None,
-                }),
+                None => Err(Error::new(ErrorType::ChessRules)),
                 Some(game) => traverse_down(game, tail),
             }
         }
@@ -179,7 +173,6 @@ struct GameInfo {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GameRepr {
-    pub index: usize,
     pub available_moves: HashMap<String, Vec<String>>,
     pub fen: String,
     pub is_takes: bool,
@@ -315,7 +308,6 @@ mod tests {
         let fen = String::from("r3r1k1/p2q1ppp/np3n2/3p4/P1pP4/2PQP3/1B2NPPP/R4RK1 w - - 0 15");
         let game = Game::from_fen(fen).unwrap();
         let g = game.get_repr();
-        assert_eq!(g.index, 0);
         assert_eq!(g.is_check, false);
         assert_eq!(g.is_takes, false)
     }

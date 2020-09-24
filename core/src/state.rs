@@ -1,22 +1,24 @@
-use crate::errors;
+use crate::api::{response_from_game, response_from_games, Response};
 use crate::errors::{Error, ErrorType};
 use crate::game::Game;
-use crate::json_stdio::{response_from_game, response_from_games, Response};
+
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockWriteGuard};
 
-type InnerState = Vec<Option<Box<Mutex<Game>>>>;
+type GameCell = Option<Mutex<Game>>;
+type InnerState = HashMap<String, GameCell>;
 
 pub struct StateHandle {
     inner: Arc<RwLock<InnerState>>,
 }
 
 impl StateHandle {
-    pub fn play(&self, index: usize, from: String, to: String) -> Result<Response, Error> {
-        self.game_operation(index, |game| game.play(&from, &to))
+    pub fn play(&self, id: &String, from: String, to: String) -> Result<Response, Error> {
+        self.game_operation(id, |game| game.play(&from, &to))
     }
 
-    pub fn navigate_back(&self, index: usize, back: u16) -> Result<Response, Error> {
-        self.game_operation(index, |game| {
+    pub fn navigate_back(&self, id: &String, back: u16) -> Result<Response, Error> {
+        self.game_operation(id, |game| {
             game.navigate_back(back);
             Ok(())
         })
@@ -27,30 +29,23 @@ impl StateHandle {
         self.state_operation(|_| Ok(()))
     }
 
-    pub fn new_game_default(&self) -> Result<Response, Error> {
+    pub fn new_game_default(&self, id: &String) -> Result<Response, Error> {
         self.state_operation(|state| {
-            state.new_game_default();
-            Ok(())
-        })
-    }
-
-    pub fn new_game_fen(&self, fen: String) -> Result<Response, Error> {
-        self.state_operation(|state| {
-            state.new_game_fen(fen.clone());
+            state.new_game_default(id)?;
             Ok(())
         })
     }
 
     /// Applies operation to a specific game located at `index`, responds with an error or with the modified game.
-    fn game_operation<C>(&self, index: usize, closure: C) -> Result<Response, Error>
+    fn game_operation<C>(&self, id: &String, closure: C) -> Result<Response, Error>
     where
         C: Fn(&mut MutexGuard<Game>) -> Result<(), Error>,
     {
         let read_guard = self.inner.read()?;
-        let mut game_guard = read_guard.get_game(index)?;
+        let mut game_guard = read_guard.get_game(id)?;
         closure(&mut game_guard)?;
 
-        Ok(response_from_game(game_guard.get_repr()))
+        Ok(response_from_game(id.clone(), game_guard.get_repr()))
     }
 
     /// Applies operation requiring access to the whole state. This is necessary to access all games or to add/delete a game.
@@ -63,17 +58,18 @@ impl StateHandle {
         let mut guard = self.inner.write()?;
         closure(&mut guard)?;
 
-        let all_games = guard.all_games().map(|game| game.get_repr());
-        Ok(response_from_games(all_games))
+        let all_games = guard
+            .all_games()
+            .map(|r| r.map(|(id, game)| (id, game.get_repr())));
+        Ok(response_from_games(all_games)?)
     }
 }
 
 impl Default for StateHandle {
     fn default() -> StateHandle {
         let state = StateHandle {
-            inner: Arc::new(RwLock::new(Vec::new())),
+            inner: Arc::new(RwLock::new(HashMap::new())),
         };
-        let _ = state.new_game_default();
         state
     }
 }
@@ -87,37 +83,34 @@ impl Clone for StateHandle {
 }
 
 trait StateOperations {
-    fn get_game(&self, index: usize) -> Result<MutexGuard<Game>, Error>;
+    fn get_game(&self, id: &String) -> Result<MutexGuard<Game>, Error>;
     fn all_games(&self) -> GamesIterator;
-    fn close_game(&mut self, index: usize) -> Result<(), Error>;
-    fn new_game_default(&mut self) -> usize;
-    fn new_game_fen(&mut self, fen: String) -> Result<usize, Error>;
+    fn close_game(&mut self, id: &String) -> Result<(), Error>;
+    fn new_game_default(&mut self, id: &String) -> Result<(), Error>;
+    fn new_game_fen(&mut self, id: &String, fen: String) -> Result<(), Error>;
 }
 
 impl StateOperations for InnerState {
-    fn get_game(&self, index: usize) -> Result<MutexGuard<Game>, Error> {
-        self.get(index)
-            .ok_or(errors::empty(ErrorType::BadHandle))?
+    fn get_game(&self, id: &String) -> Result<MutexGuard<Game>, Error> {
+        self.get(id)
+            .ok_or(Error::new(ErrorType::BadHandle).with_id(id))?
             .as_ref()
-            .ok_or(errors::empty(ErrorType::StaleHandle))?
+            .ok_or(Error::new(ErrorType::StaleHandle).with_id(id))?
             .lock()
-            .map_err(|_| errors::empty(ErrorType::PoisonedHandle))
+            .map_err(|_| Error::new(ErrorType::PoisonedHandle).with_id(id))
     }
 
     fn all_games(&self) -> GamesIterator {
-        GamesIterator {
-            target: &self,
-            index: 0,
-        }
+        GamesIterator::from(self)
     }
 
-    fn close_game(&mut self, index: usize) -> Result<(), Error> {
+    fn close_game(&mut self, id: &String) -> Result<(), Error> {
         let element = self
-            .get_mut(index)
-            .ok_or(errors::empty(ErrorType::BadHandle))?;
+            .get_mut(id)
+            .ok_or(Error::new(ErrorType::BadHandle).with_id(&id))?;
 
         match element {
-            None => Err(errors::empty(ErrorType::StaleHandle)),
+            None => Err(Error::new(ErrorType::StaleHandle).with_id(&id)),
             Some(_) => {
                 element.take();
                 Ok(())
@@ -125,44 +118,53 @@ impl StateOperations for InnerState {
         }
     }
 
-    fn new_game_default(&mut self) -> usize {
-        let game = Game::default();
-        insert_game(self, game)
+    fn new_game_default(&mut self, id: &String) -> Result<(), Error> {
+        let game = Some(Mutex::from(Game::default()));
+        self.insert(id.clone(), game);
+        Ok(())
     }
 
-    fn new_game_fen(&mut self, fen: String) -> Result<usize, Error> {
-        let game = Game::from_fen(fen)?;
-        let index = insert_game(self, game);
-        Ok(index)
+    fn new_game_fen(&mut self, id: &String, fen: String) -> Result<(), Error> {
+        let game = Some(Mutex::from(Game::from_fen(fen)?));
+        self.insert(id.clone(), game)
+            .ok_or(Error::new(ErrorType::BadHandle).with_id(&id))?;
+        Ok(())
     }
 }
 
-fn insert_game(vec: &mut InnerState, mut game: Game) -> usize {
-    let index = vec.len();
-    game.index = index;
-    let element = Some(Box::new(Mutex::new(game)));
-    vec.push(element);
-
-    index
-}
-
+type HashMapIter<'a> = dyn Iterator<Item = (&'a String, &'a Option<Mutex<Game>>)> + 'a;
 struct GamesIterator<'a> {
-    target: &'a InnerState,
-    index: usize,
+    hashmap_iter: Box<HashMapIter<'a>>,
+    is_poisoned: bool,
 }
 
 impl<'a> Iterator for GamesIterator<'a> {
-    type Item = MutexGuard<'a, Game>;
-    fn next(&mut self) -> Option<Self::Item> {
-        let result = self.target.get_game(self.index);
-        self.index += 1;
+    type Item = Result<(String, MutexGuard<'a, Game>), Error>;
 
-        match result {
-            Ok(lock) => Some(lock),
-            Err(e) => match e.error_type {
-                ErrorType::StaleHandle => self.next(),
-                _ => None,
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.is_poisoned {
+            return None;
+        }
+
+        match self.hashmap_iter.next() {
+            None => None,
+            Some((_, None)) => self.next(),
+            Some((id, Some(mutex))) => match mutex.lock() {
+                Ok(lock) => Some(Ok((id.clone(), lock))),
+                Err(err) => {
+                    self.is_poisoned = true;
+                    Some(Err(err.into()))
+                }
             },
+        }
+    }
+}
+
+impl<'a> From<&'a InnerState> for GamesIterator<'a> {
+    fn from(hashmap: &'a InnerState) -> Self {
+        GamesIterator {
+            hashmap_iter: Box::from(hashmap.iter()),
+            is_poisoned: false,
         }
     }
 }
