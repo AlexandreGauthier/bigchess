@@ -12,7 +12,7 @@ pub fn dispatch_request(request: Request, state: &StateHandle) -> Result<Respons
     let result = match request {
         Request::Play(PlayArgs { id, from, to }) => state.play(&id, from, to),
         Request::NavigateBack(NavigateBackArgs { id, back }) => state.navigate_back(&id, back),
-        Request::GetAllGames => state.get_all_games(),
+        Request::GetAllGames(_) => state.get_all_games(),
         Request::NewGame(NewGameArgs { id }) => state.new_game_default(&id),
     };
 
@@ -84,7 +84,7 @@ pub struct ChangedGame {
 pub enum Request {
     Play(PlayArgs),
     NavigateBack(NavigateBackArgs),
-    GetAllGames,
+    GetAllGames(GetAllGamesArgs),
     NewGame(NewGameArgs),
 }
 
@@ -100,6 +100,9 @@ pub struct NavigateBackArgs {
     id: String,
     back: u16,
 }
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+pub struct GetAllGamesArgs {}
 
 // TODO  more new game types (fen, pgn, path, etc.)
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
